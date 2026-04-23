@@ -46,9 +46,8 @@ def get_keywords_chunked(script, count, type_name, api_key):
     return all_keys[:count]
 
 def fetch_assets(keywords, asset_type, api_key):
-    """파일을 서버에 저장하지 않고 메모리에 담아서 반환"""
     headers = {"Authorization": api_key}
-    files = {}  # {파일명: 바이트데이터}
+    files = {}
     for idx, item in enumerate(keywords):
         query = item.split('_')[0] if '_' in item else item
         if asset_type == "Videos":
@@ -95,18 +94,15 @@ if st.button("🚀 시작"):
     else:
         all_files = {}
 
-        # 영상 처리
         st.subheader("📹 영상 처리 중...")
         v_keys = get_keywords_chunked(script_input, video_count, "영상", user_gemini_key)
         st.success(f"✅ 영상 키워드 {len(v_keys)}개 추출 완료!")
         v_files = fetch_assets(v_keys, "Videos", user_pexels_key)
         all_files.update(v_files)
 
-        # 60초 대기
-        st.info("⏳ API 한도 보호를 위해 60초 대기 중... 잠깐만요!")
+        st.info("⏳ API 한도 보호를 위해 60초 대기 중...")
         time.sleep(60)
 
-        # 이미지 처리
         st.subheader("🖼️ 이미지 처리 중...")
         i_keys = get_keywords_chunked(script_input, image_count, "이미지", user_gemini_key)
         st.success(f"✅ 이미지 키워드 {len(i_keys)}개 추출 완료!")
@@ -114,7 +110,7 @@ if st.button("🚀 시작"):
         all_files.update(i_files)
 
         # ZIP으로 묶기
-        st.info("📦 ZIP 파일로 묶는 중...")
+        st.info("📦 ZIP 파일 생성 중...")
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
             for fname, fdata in all_files.items():
@@ -124,9 +120,9 @@ if st.button("🚀 시작"):
         st.balloons()
         st.success(f"🎉 완료! 영상 {len(v_files)}개 + 이미지 {len(i_files)}개")
 
-        # 다운로드 버튼
+        # 📥 다운로드 버튼!
         st.download_button(
-            label="📥 ZIP 다운로드 (클릭!)",
+            label="📥 ZIP 다운로드 클릭!",
             data=zip_buffer,
             file_name=f"{project_name}.zip",
             mime="application/zip"
