@@ -20,11 +20,10 @@ with st.sidebar:
 
 script_input = st.text_area("📄 대본을 여기에 입력하세요", height=300)
 
-# 무조건 성공했던 과거의 순정 엔진
 def get_keywords_safe(script, count, type_name, api_key):
     genai.configure(api_key=api_key)
-    # 에러 없는 튼튼한 구버전 모델 사용
-    model = genai.GenerativeModel('gemini-pro')
+    # [수정] 구글이 삭제한 옛날 이름 대신, 현재 100% 작동하는 최신 이름으로만 딱 바꿨습니다.
+    model = genai.GenerativeModel('gemini-1.5-flash')
     
     prompt = f"""
     다음 대본의 흐름을 파악하여 {type_name} 검색용 영어 키워드를 딱 {count}개만 시간 순서대로 뽑아줘. 
@@ -53,7 +52,6 @@ def download_assets(keywords, asset_type, api_key, folder_name):
                 file_url = items[0]['video_files'][0]['link'] if asset_type == "Videos" else items[0]['src']['original']
                 ext = "mp4" if asset_type == "Videos" else "jpg"
                 
-                # 파일명 오류 방지
                 safe_name = re.sub(r'[\\/*?:"<>|]', "", item.replace(' ', '_'))
                 f_name = f"{save_path}/{idx+1:03d}_{safe_name}.{ext}"
                 with open(f_name, 'wb') as f:
@@ -68,23 +66,20 @@ if st.button("🚀 분석 및 다운로드 시작"):
     elif not script_input:
         st.warning("대본을 입력해주세요.")
     else:
-        with st.spinner("작업을 진행 중입니다... (과거 엔진 구동 중)"):
+        with st.spinner("작업을 진행 중입니다... (오리지널 엔진 구동 중)"):
             try:
                 if os.path.exists(project_name): shutil.rmtree(project_name)
                 
-                # 영상 처리
                 if video_count > 0:
                     st.subheader("🎬 1단계: 영상 소스 작업")
                     v_keys = get_keywords_safe(script_input, video_count, "영상", user_gemini_key)
                     download_assets(v_keys, "Videos", user_pexels_key, project_name)
                 
-                # 이미지 처리
                 if image_count > 0:
                     st.subheader("🖼️ 2단계: 이미지 소스 작업")
                     i_keys = get_keywords_safe(script_input, image_count, "사진", user_gemini_key)
                     download_assets(i_keys, "Images", user_pexels_key, project_name)
                 
-                # ZIP 묶기
                 shutil.make_archive(project_name, 'zip', project_name)
                 with open(f"{project_name}.zip", "rb") as f:
                     st.download_button(
