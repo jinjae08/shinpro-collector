@@ -7,8 +7,8 @@ import re
 import concurrent.futures
 import google.generativeai as genai
 
-st.set_page_config(page_title="신프로 수집기 V5.5", layout="wide")
-st.title("🎬 신프로의 스마트 실사 수집 엔진 (V5.5 최종 완성)")
+st.set_page_config(page_title="신프로 수집기 V5 (진짜 최종)", layout="wide")
+st.title("🎬 신프로의 스마트 실사 수집 엔진 (에러 완전 정복)")
 
 with st.sidebar:
     st.header("🔑 API 설정")
@@ -33,8 +33,8 @@ def clean_filename(text):
 
 def get_keywords_chunked(script, total_count, type_name, api_key):
     genai.configure(api_key=api_key)
-    # [핵심 수정] 스트림릿 웹 서버가 무조건 알아듣는 예전 '순정 모델'로 원상복구!
-    model = genai.GenerativeModel('gemini-pro') 
+    # [핵심] 이제 스트림릿 서버도 최신 라이브러리가 깔렸으므로 1.5-flash가 완벽하게 돌아갑니다!
+    model = genai.GenerativeModel('gemini-1.5-flash') 
     
     chunk_size = 1500 
     chunks = [script[i:i+chunk_size] for i in range(0, len(script), chunk_size)]
@@ -134,7 +134,7 @@ if st.button("🚀 분석 및 초고속 다운로드 시작"):
         if os.path.exists(project_name): shutil.rmtree(project_name)
         os.makedirs(project_name)
         
-        with st.spinner("V5.5 엔진 가동 중..."):
+        with st.spinner("V5 엔진 가동 중..."):
             try:
                 if video_count > 0:
                     st.subheader("🎬 1단계: 영상 소스 작업")
