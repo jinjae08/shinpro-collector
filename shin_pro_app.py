@@ -7,8 +7,8 @@ import re
 import concurrent.futures
 import google.generativeai as genai
 
-st.set_page_config(page_title="신프로 수집기 V5.3", layout="wide")
-st.title("🎬 신프로의 스마트 실사 수집 엔진 (V5.3 철벽 방어)")
+st.set_page_config(page_title="신프로 수집기 V5.4", layout="wide")
+st.title("🎬 신프로의 스마트 실사 수집 엔진 (V5.4 순정 복구)")
 
 with st.sidebar:
     st.header("🔑 API 설정")
@@ -21,6 +21,7 @@ with st.sidebar:
 
 script_input = st.text_area("📄 대본을 붙여넣으세요 (안정성을 위해 최대 5,000자 이내 권장)", height=300)
 
+# 글자 수 표시 기능 (유지)
 text_length = len(script_input)
 if text_length > 0:
     if text_length <= 5000:
@@ -31,8 +32,10 @@ if text_length > 0:
 def clean_filename(text):
     return re.sub(r'[\\/*?:"<>|]', "", text)
 
+# [복구됨] 기존에 성공했던 가장 깔끔한 엔진 
 def get_keywords_chunked(script, total_count, type_name, api_key):
     genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-1.5-flash') # 예전에 잘 되던 순정 모델 하나만 씁니다!
     
     chunk_size = 1500 
     chunks = [script[i:i+chunk_size] for i in range(0, len(script), chunk_size)]
@@ -55,29 +58,14 @@ def get_keywords_chunked(script, total_count, type_name, api_key):
         대본: {chunk}
         """
         
-        # [핵심 업데이트] 404 에러를 막는 자동 전환(Fallback) 시스템
+        # 복잡한 예외 처리 다 지우고, 직관적인 에러 출력으로 복구했습니다.
         try:
-            # 1차 시도: 최신 1.5-flash 모델
-            model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content(prompt)
-        except Exception as e:
-            if "404" in str(e) or "not found" in str(e).lower():
-                try:
-                    # 2차 시도: 웹 서버(스트림릿)가 구버전일 경우 안정적인 기본 모델(gemini-pro)로 자동 전환!
-                    model = genai.GenerativeModel('gemini-pro')
-                    response = model.generate_content(prompt)
-                except Exception as e2:
-                    st.error(f"⚠️ {idx+1}번째 덩어리 분석 실패 (API 오류).\n에러내용: {e2}")
-                    break
-            else:
-                st.error(f"⚠️ {idx+1}번째 덩어리 분석 실패! 구글 API 한도 초과일 확률이 높습니다.\n에러내용: {e}")
-                break 
-                
-        try:
             lines = [k.strip() for k in response.text.split('\n') if k.strip() and '_' in k]
             all_keys.extend(lines)
-        except:
-            pass
+        except Exception as e:
+            st.error(f"⚠️ {idx+1}번째 덩어리 분석 실패! 구글 API 한도 초과일 확률이 높습니다.\n에러내용: {e}")
+            break 
             
         progress_bar.progress((idx + 1) / len(chunks))
         
@@ -121,7 +109,7 @@ def download_assets_fast(keywords, asset_type, api_key, folder_name):
     progress_bar = st.progress(0)
     
     if not keywords:
-        st.warning(f"⚠️ 추출된 {asset_type} 키워드가 없습니다. 구글 API 한도를 다 썼거나 에러가 발생했습니다.")
+        st.warning(f"⚠️ 추출된 {asset_type} 키워드가 없습니다. API 오류를 확인해주세요.")
         return
         
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
@@ -148,7 +136,7 @@ if st.button("🚀 분석 및 초고속 다운로드 시작"):
         if os.path.exists(project_name): shutil.rmtree(project_name)
         os.makedirs(project_name)
         
-        with st.spinner("V5.3 엔진 가동 중..."):
+        with st.spinner("V5.4 엔진 가동 중..."):
             try:
                 if video_count > 0:
                     st.subheader("🎬 1단계: 영상 소스 작업")
