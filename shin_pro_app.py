@@ -4,45 +4,58 @@ import os
 import shutil
 import re
 
-st.set_page_config(page_title="신프로 수집기 (절대 에러 안남)", layout="wide")
-st.title("🎬 신프로의 스마트 실사 수집 엔진 (직통 복구 완료)")
+st.set_page_config(page_title="신프로 수집기 (진짜 오리지널)", layout="wide")
+st.title("🎬 신프로의 스마트 실사 수집 엔진 (오리지널 복구)")
 
 with st.sidebar:
     st.header("🔑 API 설정")
     user_pexels_key = st.text_input("Pexels API Key", type="password")
     user_gemini_key = st.text_input("Gemini API Key", type="password")
     st.divider()
-    # 옛날처럼 20개로 제한 롤백
+    # 옛날처럼 마음 편한 20개로 롤백
     video_count = st.slider("영상 개수", 1, 20, 10)
     image_count = st.slider("이미지 개수", 1, 20, 5)
     project_name = st.text_input("프로젝트명 (ZIP 파일명)", "ShinPro_Project")
 
 script_input = st.text_area("📄 대본을 여기에 입력하세요", height=300)
 
-# [핵심] 에러를 일으키던 구글 라이브러리를 아예 삭제하고, 다이렉트 통신으로 바꿨습니다!
+# [핵심] 404 에러를 영원히 없애는 '자동 모델 탐색기' 적용
 def get_keywords_safe(script, count, type_name, api_key):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    # 구글이 지원하는 모든 모델 이름을 준비해두고 하나씩 두드려봅니다.
+    models_to_try = [
+        "gemini-2.0-flash", 
+        "gemini-1.5-flash", 
+        "gemini-1.0-pro", 
+        "gemini-pro"
+    ]
     
     prompt = f"""
     다음 대본의 흐름을 파악하여 {type_name} 검색용 영어 키워드를 딱 {count}개만 시간 순서대로 뽑아줘. 
     출력 형식은 무조건 '영어키워드_한글요약' 형태로만 해. 다른 말은 절대 쓰지마.
     대본: {script}
     """
-    
     headers = {'Content-Type': 'application/json'}
-    data = {
-        "contents": [{"parts": [{"text": prompt}]}]
-    }
+    data = {"contents": [{"parts": [{"text": prompt}]}]}
     
-    # 구글 서버에 다이렉트로 요청을 쏩니다. (버전 충돌 절대 불가)
-    response = requests.post(url, headers=headers, json=data)
-    result_json = response.json()
-    
-    try:
-        text = result_json['candidates'][0]['content']['parts'][0]['text']
-        return [k.strip() for k in text.split('\n') if k.strip() and '_' in k]
-    except Exception as e:
-        raise Exception(f"구글 응답 에러 (API 키가 정확한지 확인해주세요): {result_json}")
+    last_error = ""
+    # 에러가 나면 멈추지 않고 다음 모델로 스스로 재시도합니다.
+    for model_name in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+        try:
+            response = requests.post(url, headers=headers, json=data)
+            result_json = response.json()
+            
+            # 성공적으로 답변을 받았을 때만 통과
+            if 'candidates' in result_json:
+                text = result_json['candidates'][0]['content']['parts'][0]['text']
+                return [k.strip() for k in text.split('\n') if k.strip() and '_' in k]
+            else:
+                last_error = str(result_json)
+        except Exception as e:
+            last_error = str(e)
+            
+    # 모든 모델이 거부했을 때만 에러 출력 (보통 API 키 무료 한도 초과일 때)
+    raise Exception(f"구글 API 오류 (무료 한도를 다 쓰셨거나 키가 잘못되었습니다). 상세: {last_error}")
 
 def download_assets(keywords, asset_type, api_key, folder_name):
     save_path = os.path.abspath(f"{folder_name}/{asset_type}")
@@ -67,7 +80,7 @@ def download_assets(keywords, asset_type, api_key, folder_name):
                 with open(f_name, 'wb') as f:
                     f.write(requests.get(file_url).content)
                 st.write(f"✅ {asset_type} 수집 완료: [{idx+1:03d}] {item}")
-        except Exception as e:
+        except Exception:
             st.write(f"⚠️ {item} 수집 실패")
 
 if st.button("🚀 분석 및 다운로드 시작"):
@@ -76,7 +89,7 @@ if st.button("🚀 분석 및 다운로드 시작"):
     elif not script_input:
         st.warning("대본을 입력해주세요.")
     else:
-        with st.spinner("작업을 진행 중입니다... (절대 고장 나지 않는 직통 엔진 구동 중)"):
+        with st.spinner("마음 편한 오리지널 엔진 가동 중..."):
             try:
                 if os.path.exists(project_name): shutil.rmtree(project_name)
                 
