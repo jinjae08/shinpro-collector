@@ -7,35 +7,30 @@ import re
 import concurrent.futures
 import google.generativeai as genai
 
-st.set_page_config(page_title="신프로 수집기 V5", layout="wide")
-st.title("🎬 신프로의 스마트 실사 수집 엔진 (V5 초고속 & 안정화)")
+st.set_page_config(page_title="신프로 수집기 V5.1", layout="wide")
+st.title("🎬 신프로의 스마트 실사 수집 엔진 (V5.1 안정화)")
 
 with st.sidebar:
     st.header("🔑 API 설정")
     user_pexels_key = st.text_input("Pexels API Key", type="password")
     user_gemini_key = st.text_input("Gemini API Key", type="password")
     st.divider()
-    # 50개까지 슬라이더 전격 확장!
     video_count = st.slider("영상 개수", 1, 50, 20)
     image_count = st.slider("이미지 개수", 1, 50, 10)
     project_name = st.text_input("프로젝트명 (ZIP 파일명)", "ShinPro_Project")
 
-script_input = st.text_area("📄 1만 자 대본을 마음껏 붙여넣으세요 (내부에서 알아서 분할 처리됩니다)", height=300)
+script_input = st.text_area("📄 대본을 붙여넣으세요 (안정성을 위해 최대 5,000자 이내 권장)", height=300)
 
 def clean_filename(text):
-    # 파일명에 쓸 수 없는 특수문자 제거
     return re.sub(r'[\\/*?:"<>|]', "", text)
 
-# [업데이트 1] 1만 자 대본 에러 방지용 자동 분할 추출
 def get_keywords_chunked(script, total_count, type_name, api_key):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
     
-    # 대본을 2000자씩 분할
-    chunk_size = 2000
+    chunk_size = 1500 # 더 안전하게 1500자로 쪼갬
     chunks = [script[i:i+chunk_size] for i in range(0, len(script), chunk_size)]
     
-    # 50개를 요청했다면, 분할된 덩어리 개수에 맞춰 목표 개수를 배분
     base_count = total_count // len(chunks)
     remainder = total_count % len(chunks)
     counts = [base_count + 1 if i < remainder else base_count for i in range(len(chunks))]
@@ -57,18 +52,18 @@ def get_keywords_chunked(script, total_count, type_name, api_key):
             response = model.generate_content(prompt)
             lines = [k.strip() for k in response.text.split('\n') if k.strip() and '_' in k]
             all_keys.extend(lines)
-        except Exception:
-            pass # 에러가 나도 멈추지 않고 다음 덩어리로 넘어감
+        except Exception as e:
+            # [수정] 조용히 넘어가지 않고 에러를 화면에 뿌려줍니다!
+            st.error(f"⚠️ {idx+1}번째 덩어리 분석 실패! 구글 API 한도 초과일 확률이 높습니다.\n에러내용: {e}")
+            break # 에러 나면 즉시 중단
             
         progress_bar.progress((idx + 1) / len(chunks))
         
-        # 무료 API 한도 초과 방지를 위한 15초 휴식 (마지막 덩어리가 아닐 때만)
         if idx < len(chunks) - 1:
-            time.sleep(15) 
+            time.sleep(10) 
             
     return all_keys[:total_count]
 
-# [업데이트 2] 단일 파일 다운로드 및 Vrew 최적화 이름 적용
 def download_single_item(item, idx, asset_type, api_key, save_path):
     headers = {"Authorization": api_key}
     try:
@@ -85,7 +80,6 @@ def download_single_item(item, idx, asset_type, api_key, save_path):
             file_url = items[0]['video_files'][0]['link'] if asset_type == "Videos" else items[0]['src']['original']
             ext = "mp4" if asset_type == "Videos" else "jpg"
             
-            # Vrew 최적화 파일명 설정 (001_영어_한글뜻.mp4)
             safe_name = clean_filename(f"{query}_{kor_meaning}".replace(" ", "_"))
             f_name = os.path.join(save_path, f"{idx+1:03d}_{safe_name}.{ext}")
             
@@ -96,7 +90,6 @@ def download_single_item(item, idx, asset_type, api_key, save_path):
         return False
     return False
 
-# [업데이트 3] 초고속 멀티스레드 엔진
 def download_assets_fast(keywords, asset_type, api_key, folder_name):
     save_path = os.path.join(folder_name, asset_type)
     os.makedirs(save_path, exist_ok=True)
@@ -105,7 +98,10 @@ def download_assets_fast(keywords, asset_type, api_key, folder_name):
     progress_text = st.empty()
     progress_bar = st.progress(0)
     
-    # 5개의 파이프라인으로 동시에 영상/사진을 빨아들임
+    if not keywords:
+        st.warning(f"⚠️ 추출된 {asset_type} 키워드가 없습니다. API 에러를 확인해주세요.")
+        return
+        
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(download_single_item, item, idx, asset_type, api_key, save_path): item for idx, item in enumerate(keywords)}
         
@@ -114,37 +110,35 @@ def download_assets_fast(keywords, asset_type, api_key, folder_name):
             success = future.result()
             if success: success_count += 1
             completed += 1
-            progress_text.text(f"⚡ {asset_type} 초고속 다운로드 중... ({completed}/{len(keywords)})")
+            progress_text.text(f"⚡ {asset_type} 다운로드 중... ({completed}/{len(keywords)})")
             progress_bar.progress(completed / len(keywords))
             
     st.write(f"✅ {asset_type} {success_count}개 수집 완료!")
 
-# 실행 메인 로직
 if st.button("🚀 분석 및 초고속 다운로드 시작"):
     if not user_pexels_key or not user_gemini_key:
         st.error("API 키를 모두 입력해주세요.")
     elif not script_input:
         st.warning("대본을 입력해주세요.")
+    # [수정] 신프로님의 아이디어 적용! 5,000자 초과 시 경고 후 중단
+    elif len(script_input) > 5000:
+        st.error(f"🚨 현재 대본 길이는 {len(script_input):,}자입니다. 구글 AI의 과부하 방지를 위해 5,000자 이내로 잘라서 넣어주세요!")
     else:
-        # 기존 작업 폴더 초기화
         if os.path.exists(project_name): shutil.rmtree(project_name)
         os.makedirs(project_name)
         
-        with st.spinner("V5 엔진 가동 중... (1만 자 대본은 중간중간 쉬어가며 처리하므로 여유를 가져주세요)"):
+        with st.spinner("V5.1 엔진 가동 중..."):
             try:
-                # 1. 영상 작업
                 if video_count > 0:
                     st.subheader("🎬 1단계: 영상 소스 작업")
                     v_keys = get_keywords_chunked(script_input, video_count, "영상", user_gemini_key)
                     download_assets_fast(v_keys, "Videos", user_pexels_key, project_name)
                 
-                # 2. 사진 작업
                 if image_count > 0:
                     st.subheader("🖼️ 2단계: 이미지 소스 작업")
                     i_keys = get_keywords_chunked(script_input, image_count, "사진", user_gemini_key)
                     download_assets_fast(i_keys, "Images", user_pexels_key, project_name)
                 
-                # 3. ZIP 파일 생성 및 제공
                 shutil.make_archive(project_name, 'zip', project_name)
                 with open(f"{project_name}.zip", "rb") as f:
                     st.download_button(
@@ -154,6 +148,6 @@ if st.button("🚀 분석 및 초고속 다운로드 시작"):
                         mime="application/zip",
                         type="primary"
                     )
-                st.success("🎉 모든 작업이 끝났습니다! 위 버튼을 눌러 압축파일을 다운로드하세요.")
+                st.success("🎉 모든 작업이 끝났습니다!")
             except Exception as e:
                 st.error(f"최종 오류 발생: {e}")
