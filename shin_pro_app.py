@@ -7,8 +7,8 @@ import re
 import concurrent.futures
 import google.generativeai as genai
 
-st.set_page_config(page_title="신프로 수집기 V5.4", layout="wide")
-st.title("🎬 신프로의 스마트 실사 수집 엔진 (V5.4 순정 복구)")
+st.set_page_config(page_title="신프로 수집기 V5.5", layout="wide")
+st.title("🎬 신프로의 스마트 실사 수집 엔진 (V5.5 최종 완성)")
 
 with st.sidebar:
     st.header("🔑 API 설정")
@@ -21,7 +21,6 @@ with st.sidebar:
 
 script_input = st.text_area("📄 대본을 붙여넣으세요 (안정성을 위해 최대 5,000자 이내 권장)", height=300)
 
-# 글자 수 표시 기능 (유지)
 text_length = len(script_input)
 if text_length > 0:
     if text_length <= 5000:
@@ -32,10 +31,10 @@ if text_length > 0:
 def clean_filename(text):
     return re.sub(r'[\\/*?:"<>|]', "", text)
 
-# [복구됨] 기존에 성공했던 가장 깔끔한 엔진 
 def get_keywords_chunked(script, total_count, type_name, api_key):
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash') # 예전에 잘 되던 순정 모델 하나만 씁니다!
+    # [핵심 수정] 스트림릿 웹 서버가 무조건 알아듣는 예전 '순정 모델'로 원상복구!
+    model = genai.GenerativeModel('gemini-pro') 
     
     chunk_size = 1500 
     chunks = [script[i:i+chunk_size] for i in range(0, len(script), chunk_size)]
@@ -58,7 +57,6 @@ def get_keywords_chunked(script, total_count, type_name, api_key):
         대본: {chunk}
         """
         
-        # 복잡한 예외 처리 다 지우고, 직관적인 에러 출력으로 복구했습니다.
         try:
             response = model.generate_content(prompt)
             lines = [k.strip() for k in response.text.split('\n') if k.strip() and '_' in k]
@@ -136,7 +134,7 @@ if st.button("🚀 분석 및 초고속 다운로드 시작"):
         if os.path.exists(project_name): shutil.rmtree(project_name)
         os.makedirs(project_name)
         
-        with st.spinner("V5.4 엔진 가동 중..."):
+        with st.spinner("V5.5 엔진 가동 중..."):
             try:
                 if video_count > 0:
                     st.subheader("🎬 1단계: 영상 소스 작업")
