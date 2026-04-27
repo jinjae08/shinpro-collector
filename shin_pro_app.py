@@ -7,8 +7,8 @@ import re
 import concurrent.futures
 import google.generativeai as genai
 
-st.set_page_config(page_title="신프로 수집기 V5.1", layout="wide")
-st.title("🎬 신프로의 스마트 실사 수집 엔진 (V5.1 안정화)")
+st.set_page_config(page_title="신프로 수집기 V5.2", layout="wide")
+st.title("🎬 신프로의 스마트 실사 수집 엔진 (V5.2 글자수 표시)")
 
 with st.sidebar:
     st.header("🔑 API 설정")
@@ -19,7 +19,16 @@ with st.sidebar:
     image_count = st.slider("이미지 개수", 1, 50, 10)
     project_name = st.text_input("프로젝트명 (ZIP 파일명)", "ShinPro_Project")
 
+# 대본 입력창
 script_input = st.text_area("📄 대본을 붙여넣으세요 (안정성을 위해 최대 5,000자 이내 권장)", height=300)
+
+# [업데이트] 글자 수 실시간 표시기능
+text_length = len(script_input)
+if text_length > 0:
+    if text_length <= 5000:
+        st.success(f"✍️ 현재 글자 수: {text_length:,}자 (안전하게 분석 가능한 길이입니다!)")
+    else:
+        st.error(f"🚨 현재 글자 수: {text_length:,}자 (5,000자를 초과했습니다! 내용을 조금 줄여주세요.)")
 
 def clean_filename(text):
     return re.sub(r'[\\/*?:"<>|]', "", text)
@@ -28,7 +37,7 @@ def get_keywords_chunked(script, total_count, type_name, api_key):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
     
-    chunk_size = 1500 # 더 안전하게 1500자로 쪼갬
+    chunk_size = 1500 
     chunks = [script[i:i+chunk_size] for i in range(0, len(script), chunk_size)]
     
     base_count = total_count // len(chunks)
@@ -53,9 +62,8 @@ def get_keywords_chunked(script, total_count, type_name, api_key):
             lines = [k.strip() for k in response.text.split('\n') if k.strip() and '_' in k]
             all_keys.extend(lines)
         except Exception as e:
-            # [수정] 조용히 넘어가지 않고 에러를 화면에 뿌려줍니다!
             st.error(f"⚠️ {idx+1}번째 덩어리 분석 실패! 구글 API 한도 초과일 확률이 높습니다.\n에러내용: {e}")
-            break # 에러 나면 즉시 중단
+            break 
             
         progress_bar.progress((idx + 1) / len(chunks))
         
@@ -120,14 +128,13 @@ if st.button("🚀 분석 및 초고속 다운로드 시작"):
         st.error("API 키를 모두 입력해주세요.")
     elif not script_input:
         st.warning("대본을 입력해주세요.")
-    # [수정] 신프로님의 아이디어 적용! 5,000자 초과 시 경고 후 중단
-    elif len(script_input) > 5000:
-        st.error(f"🚨 현재 대본 길이는 {len(script_input):,}자입니다. 구글 AI의 과부하 방지를 위해 5,000자 이내로 잘라서 넣어주세요!")
+    elif text_length > 5000:
+        st.error("🚨 대본이 5,000자를 초과했습니다. 분석이 불가능하니 길이를 줄여주세요!")
     else:
         if os.path.exists(project_name): shutil.rmtree(project_name)
         os.makedirs(project_name)
         
-        with st.spinner("V5.1 엔진 가동 중..."):
+        with st.spinner("V5.2 엔진 가동 중..."):
             try:
                 if video_count > 0:
                     st.subheader("🎬 1단계: 영상 소스 작업")
