@@ -4,8 +4,8 @@ import os
 import shutil
 import re
 
-st.set_page_config(page_title="신프로 수집기 (완전 독립형)", layout="wide")
-st.title("🎬 신프로의 스마트 실사 수집 엔진 (에러 완전 해결)")
+st.set_page_config(page_title="신프로 수집기 (만능 마스터키)", layout="wide")
+st.title("🎬 신프로의 스마트 실사 수집 엔진 (마지막 열쇠)")
 
 with st.sidebar:
     st.header("🔑 API 설정")
@@ -18,10 +18,14 @@ with st.sidebar:
 
 script_input = st.text_area("📄 대본을 여기에 입력하세요", height=300)
 
-# [핵심] 구글 라이브러리를 거치지 않고 인터넷 주소로 다이렉트 요청!
+# [핵심] 신프로님의 API 키에 맞는 모델을 찾을 때까지 전부 두드려보는 자동 탐색 기능
 def get_keywords_direct(script, count, type_name, api_key):
-    # 가장 빠르고 안정적인 1.5-flash 모델로 직통 연결
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    models_to_try = [
+        "gemini-pro",       # 예전에 성공하셨던 친숙한 옛날 모델 (1순위)
+        "gemini-1.0-pro",   # 옛날 모델의 업데이트 버전
+        "gemini-1.5-flash", # 최신 모델
+        "gemini-1.5-pro"    # 최신 고급 모델
+    ]
     
     prompt = f"""
     다음 대본의 흐름을 파악하여 {type_name} 검색용 영어 키워드를 딱 {count}개만 시간 순서대로 뽑아줘. 
@@ -32,18 +36,24 @@ def get_keywords_direct(script, count, type_name, api_key):
     headers = {'Content-Type': 'application/json'}
     data = {"contents": [{"parts": [{"text": prompt}]}]}
     
-    # 직통 연결 전송
-    response = requests.post(url, headers=headers, json=data)
-    result_json = response.json()
-    
-    try:
-        if 'candidates' in result_json:
-            text = result_json['candidates'][0]['content']['parts'][0]['text']
-            return [k.strip() for k in text.split('\n') if k.strip() and '_' in k]
-        else:
-            raise Exception(f"응답 오류: {result_json}")
-    except Exception as e:
-        raise Exception(f"API 오류가 발생했습니다. (키를 확인해주세요): {e}")
+    last_error = ""
+    for model in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        try:
+            response = requests.post(url, headers=headers, json=data)
+            result_json = response.json()
+            
+            # 성공적으로 답변을 받으면 바로 반복문을 멈추고 결과를 반환합니다.
+            if 'candidates' in result_json:
+                text = result_json['candidates'][0]['content']['parts'][0]['text']
+                return [k.strip() for k in text.split('\n') if k.strip() and '_' in k]
+            else:
+                last_error = str(result_json)
+        except Exception as e:
+            last_error = str(e)
+            
+    # 모든 모델이 거부했을 때만 최종 에러를 띄웁니다.
+    raise Exception(f"구글 API 키가 만료되었거나 한도가 초과되었습니다. 구글 AI 스튜디오에서 새 API 키를 발급받아주세요. 상세: {last_error}")
 
 def download_assets(keywords, asset_type, api_key, folder_name):
     save_path = os.path.abspath(f"{folder_name}/{asset_type}")
@@ -77,7 +87,7 @@ if st.button("🚀 분석 및 다운로드 시작"):
     elif not script_input:
         st.warning("대본을 입력해주세요.")
     else:
-        with st.spinner("구글 직통 통신망 가동 중..."):
+        with st.spinner("마스터키로 구글 서버 접속 중..."):
             try:
                 if os.path.exists(project_name): shutil.rmtree(project_name)
                 
