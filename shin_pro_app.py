@@ -4,8 +4,8 @@ import os
 import shutil
 import re
 
-st.set_page_config(page_title="신프로 수집기 (진짜 최종본)", layout="wide")
-st.title("🎬 신프로의 스마트 실사 수집 엔진 (진짜 최종본)")
+st.set_page_config(page_title="신프로 수집기 (무결점 버전)", layout="wide")
+st.title("🎬 신프로의 스마트 실사 수집 엔진 (에러 제로)")
 
 with st.sidebar:
     st.header("🔑 API 설정")
@@ -19,7 +19,7 @@ with st.sidebar:
 script_input = st.text_area("📄 대본을 여기에 입력하세요", height=300)
 
 def get_keywords_direct(script, count, type_name, api_key):
-    # 이것저것 두드리지 않고, 가장 확실한 1.5-flash 모델 딱 하나만 씁니다!
+    # 가장 빠르고 확실한 1.5-flash 모델 직통 연결 (라이브러리 충돌 없음)
     model = "gemini-1.5-flash"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     
@@ -73,7 +73,7 @@ if st.button("🚀 분석 및 다운로드 시작"):
     elif not script_input:
         st.warning("대본을 입력해주세요.")
     else:
-        with st.spinner("영상 추출 중입니다..."):
+        with st.spinner("무결점 엔진으로 안전하게 영상 추출 중입니다..."):
             try:
                 if os.path.exists(project_name): shutil.rmtree(project_name)
                 
@@ -96,7 +96,6 @@ if st.button("🚀 분석 및 다운로드 시작"):
                         mime="application/zip",
                         type="primary"
                     )
-                
                 st.success("🎉 모든 작업이 끝났습니다!")
             except Exception as e:
                 st.error(f"오류 발생: {e}")
