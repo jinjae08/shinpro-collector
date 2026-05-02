@@ -5,8 +5,8 @@ import shutil
 import re
 from google import genai
 
-st.set_page_config(page_title="신프로 캡컷 소스 공급기", layout="wide")
-st.title("🎬 신프로의 CapCut 스튜디오 소스 공급기 (하이브리드)")
+st.set_page_config(page_title="신프로 캡컷 소스 공급기 (50개 확장)", layout="wide")
+st.title("🎬 신프로의 CapCut 스튜디오 소스 공급기 (50개 확장)")
 
 with st.sidebar:
     st.header("🔑 API 설정")
@@ -21,14 +21,14 @@ mode = st.radio(
     ["A플랜: 대본 넣고 자동 추출 (Gemini API)", "B플랜: 키워드 직접 입력 (API 없이 즉시 다운로드)"]
 )
 
-# UI 구성
 if "A플랜" in mode:
     script_input = st.text_area("📄 대본을 여기에 입력하세요", height=200)
     col1, col2 = st.columns(2)
-    with col1: video_count = st.slider("영상 개수", 1, 20, 10)
-    with col2: image_count = st.slider("이미지 개수", 1, 20, 5)
+    # 신프로님 요청대로 최대 50개로 제한을 풀었습니다!
+    with col1: video_count = st.slider("영상 개수", 1, 50, 20)
+    with col2: image_count = st.slider("이미지 개수", 1, 50, 10)
 else:
-    st.info("💡 챗GPT나 Gemini에게 키워드를 뽑아달라고 한 뒤, 아래에 한 줄에 하나씩 붙여넣으세요. (예: `기름_Oil`, `비행기_Airplane`)")
+    st.info("💡 챗GPT나 Gemini에게 키워드를 뽑아달라고 한 뒤, 아래에 한 줄에 하나씩 붙여넣으세요.")
     manual_video_keys = st.text_area("🎥 영상 검색용 키워드 (한 줄에 하나씩)", height=150)
     manual_image_keys = st.text_area("🖼️ 이미지 검색용 키워드 (한 줄에 하나씩)", height=100)
 
@@ -36,13 +36,12 @@ def extract_keywords_with_genai(script, count, type_name, api_key):
     client = genai.Client(api_key=api_key)
     prompt = f"다음 대본을 읽고 {type_name} 검색용 영어 키워드 {count}개를 '영어키워드_한글의미' 형태로만 추출해. 다른 설명은 절대 금지.\n대본: {script}"
     response = client.models.generate_content(
-        model='gemini-2.0-flash', # 구글의 가장 최신 기본 모델
+        model='gemini-2.0-flash', 
         contents=prompt
     )
     return [k.strip() for k in response.text.split('\n') if k.strip() and '_' in k]
 
 def download_assets(keywords, asset_type, api_key, folder_name):
-    # 캡컷 스튜디오에 맞게 폴더명 지정 (Videos -> 영상, Images -> 이미지)
     save_path = os.path.abspath(f"{folder_name}/{'영상' if asset_type == 'Videos' else '이미지'}")
     if not os.path.exists(save_path): os.makedirs(save_path)
     headers = {"Authorization": api_key}
@@ -60,7 +59,6 @@ def download_assets(keywords, asset_type, api_key, folder_name):
                 file_url = items[0]['video_files'][0]['link'] if asset_type == "Videos" else items[0]['src']['original']
                 ext = "mp4" if asset_type == "Videos" else "jpg"
                 
-                # 캡컷 스튜디오 넘버링 형식 (001_키워드.mp4)
                 safe_name = re.sub(r'[\\/*?:"<>|]', "", item.replace(' ', '_'))
                 f_name = f"{save_path}/{idx+1:03d}_{safe_name}.{ext}"
                 with open(f_name, 'wb') as f:
