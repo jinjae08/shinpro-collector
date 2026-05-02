@@ -24,7 +24,6 @@ mode = st.radio(
 if "A플랜" in mode:
     script_input = st.text_area("📄 대본을 여기에 입력하세요", height=200)
     col1, col2 = st.columns(2)
-    # 신프로님 요청대로 최대 50개로 제한을 풀었습니다!
     with col1: video_count = st.slider("영상 개수", 1, 50, 20)
     with col2: image_count = st.slider("이미지 개수", 1, 50, 10)
 else:
