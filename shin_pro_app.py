@@ -2,295 +2,318 @@ import streamlit as st
 import requests
 import os
 import shutil
+import csv
+import io
 import re
 import time
-from pathlib import Path
-from google import genai
 
-# ──────────────────────────────────────────────
-# 기본 설정
-# ──────────────────────────────────────────────
-st.set_page_config(page_title="신프로 캡컷 소스 공급기 v2", layout="wide")
-st.title("🎬 신프로의 CapCut 소스 공급기 v2.0 (Pexels + Pixabay 듀얼엔진)")
+st.set_page_config(page_title="신프로 CapCut 소스 공급기 v2.1", layout="wide")
+st.title("🎬 신프로의 만능 소스 자동 수집기 v2.1")
 
-# ──────────────────────────────────────────────
-# 사이드바 설정
-# ──────────────────────────────────────────────
+# ── 사이드바 ────────────────────────────────────────────────
 with st.sidebar:
     st.header("🔑 API 설정")
-    user_pexels_key  = st.text_input("Pexels API Key",   type="password")
-    user_pixabay_key = st.text_input("Pixabay API Key",  type="password")
-    user_gemini_key  = st.text_input("Gemini API Key (A플랜 전용)", type="password")
+    user_pexels_key  = st.text_input("1. Pexels API Key",  type="password")
+    user_pixabay_key = st.text_input("2. Pixabay API Key", type="password")
+    st.divider()
+    project_name   = st.text_input("프로젝트명", "ShinPro_Final")
     st.divider()
 
-    # ✅ 로컬 저장 경로 직접 지정 (서버 RAM 폭발 방지 핵심!)
-    default_path = str(Path.home() / "Desktop" / "CapCut_Sources")
-    save_root = st.text_input("💾 로컬 저장 경로", value=default_path)
-    project_name = st.text_input("📁 프로젝트 폴더명", "ShinPro_Project_01")
-
-    st.divider()
-    st.header("⚙️ 다운로드 품질 설정")
-    video_quality = st.selectbox(
-        "영상 화질 (16:9 롱폼 기준)",
-        ["large (3840x2160 / 4K)", "medium (1920x1080 / FHD)", "small (1280x720 / HD)"],
-        index=1  # 기본값: FHD
+    st.markdown("**⏱ 요청 간격 설정**")
+    req_interval = st.slider(
+        "요청 간격 (초)",
+        min_value=0.5, max_value=5.0, value=1.0, step=0.5,
+        help="API 요청 간격. 느릴수록 안정적."
     )
-    quality_key = video_quality.split(" ")[0]  # "large" / "medium" / "small"
+    max_per_hour = int(3600 / req_interval)
+    st.caption(f"현재 설정: {req_interval}초 간격 → 시간당 최대 {max_per_hour}회")
+    st.divider()
+
+    clear_existing = st.toggle("기존 파일 덮어쓰기", value=False)
+
+    if st.button("🔍 API 키 테스트"):
+        if user_pexels_key:
+            try:
+                r = requests.get(
+                    "https://api.pexels.com/v1/search?query=nature&per_page=1",
+                    headers={"Authorization": user_pexels_key}, timeout=10
+                )
+                if r.status_code == 200:
+                    st.success("✅ Pexels API 정상")
+                else:
+                    st.error(f"❌ Pexels 오류: {r.status_code}")
+            except Exception as e:
+                st.error(f"❌ Pexels 연결 실패: {e}")
+        if user_pixabay_key:
+            try:
+                r = requests.get(
+                    f"https://pixabay.com/api/?key={user_pixabay_key}&q=nature&per_page=3",
+                    timeout=10
+                )
+                if r.status_code == 200:
+                    st.success("✅ Pixabay API 정상")
+                else:
+                    st.error(f"❌ Pixabay 오류: {r.status_code}")
+            except Exception as e:
+                st.error(f"❌ Pixabay 연결 실패: {e}")
 
     st.divider()
-    st.caption("📌 로컬 실행 전용 버전 — 파일은 ZIP 없이 폴더에 직접 저장됩니다.")
+    if st.button("🗑 중복 ID 초기화"):
+        if 'downloaded_ids' in st.session_state:
+            st.session_state.downloaded_ids = set()
+            st.success("초기화 완료")
 
-# ──────────────────────────────────────────────
-# 플랜 선택
-# ──────────────────────────────────────────────
-st.markdown("### ⚙️ 작업 방식 선택")
-mode = st.radio(
-    "Gemini API 에러 시 B플랜을 선택하세요.",
-    ["A플랜: 대본 넣고 자동 추출 (Gemini API)", "B플랜: 키워드 직접 입력 (즉시 다운로드)"]
-)
+# ── 메인 레이아웃: 2컬럼 ────────────────────────────────────
+col_left, col_right = st.columns(2)
 
-if "A플랜" in mode:
-    script_input = st.text_area("📄 대본을 여기에 입력하세요", height=200)
-    col1, col2 = st.columns(2)
-    with col1: video_count = st.slider("영상 개수", 1, 50, 20)
-    with col2: image_count = st.slider("이미지 개수", 1, 50, 10)
-else:
-    st.info("💡 ChatGPT 또는 Gemini에서 키워드를 뽑아 아래에 붙여넣으세요 (한 줄 = 하나)")
-    manual_video_keys = st.text_area("🎥 영상 키워드 (영어키워드_한글의미 또는 영어만)", height=150)
-    manual_image_keys = st.text_area("🖼️ 이미지 키워드 (영어키워드_한글의미 또는 영어만)", height=100)
-
-
-# ──────────────────────────────────────────────
-# Gemini 키워드 추출
-# ──────────────────────────────────────────────
-def extract_keywords_with_genai(script, count, type_name, api_key):
-    client = genai.Client(api_key=api_key)
-    prompt = (
-        f"다음 대본을 읽고 {type_name} 검색용 영어 키워드 {count}개를 "
-        f"'영어키워드_한글의미' 형태로만 추출해. "
-        f"번호나 다른 설명은 절대 금지. 한 줄에 하나씩만.\n대본: {script}"
+# ── 1단계: CSV 업로드 ────────────────────────────────────────
+with col_left:
+    st.markdown("### 📂 1단계: CSV 업로드")
+    st.caption("Claude가 만든 CSV 파일 (v5.1 both 타입 지원)")
+    uploaded_file = st.file_uploader(
+        "파일을 드래그 앤 드롭 하세요",
+        type=['csv', 'txt'],
+        label_visibility="collapsed"
     )
-    response = client.models.generate_content(model='gemini-2.0-flash', contents=prompt)
-    raw_lines = response.text.split('\n')
-    result = []
-    for line in raw_lines:
+
+# ── 2단계: 키워드 붙여넣기 ───────────────────────────────────
+with col_right:
+    st.markdown("### 🔑 2단계: 키워드 붙여넣기")
+    st.caption("Claude 출력 키워드를 그대로 붙여넣으세요")
+
+    tab_img, tab_vid = st.tabs(["📷 이미지 키워드", "🎬 영상 키워드"])
+
+    with tab_img:
+        img_keyword_raw = st.text_area(
+            "이미지 키워드",
+            placeholder="001 | airport control room supervisor alarm\n002 | europe oil pipeline night crisis\n...",
+            height=200,
+            label_visibility="collapsed"
+        )
+
+    with tab_vid:
+        vid_keyword_raw = st.text_area(
+            "영상 키워드",
+            placeholder="001 | control room alarm warning lights\n002 | europe oil crisis pipeline aerial\n...",
+            height=200,
+            label_visibility="collapsed"
+        )
+
+st.divider()
+
+# ── 키워드 파싱 함수 ─────────────────────────────────────────
+def parse_keywords(raw_text: str) -> dict:
+    """
+    001 | keyword here
+    002 | another keyword
+    형식을 파싱해서 {1: "keyword here", 2: "another keyword"} 반환
+    """
+    result = {}
+    if not raw_text.strip():
+        return result
+    for line in raw_text.strip().splitlines():
         line = line.strip()
         if not line:
             continue
-        # 앞 번호 제거 (예: "1. keyword_한글" → "keyword_한글")
-        line = re.sub(r'^\d+[\.\)]\s*', '', line)
-        if '_' in line or line.isascii():
-            result.append(line)
+        m = re.match(r'^(\d+)\s*\|\s*(.+)$', line)
+        if m:
+            num = int(m.group(1))
+            kw  = m.group(2).strip()
+            result[num] = kw
     return result
 
+# ── CSV 파싱 함수 ─────────────────────────────────────────────
+def parse_csv(uploaded) -> list:
+    raw = uploaded.getvalue().decode('utf-8-sig')
+    match = re.search(r'scene_number,.*', raw, re.DOTALL)
+    if not match:
+        return []
+    return list(csv.DictReader(io.StringIO(match.group(0).strip())))
 
-# ──────────────────────────────────────────────
-# 핵심 함수: 스트리밍 다운로드 (RAM 폭발 방지)
-# ──────────────────────────────────────────────
-def stream_download(url, file_path, headers=None):
-    """파일을 RAM에 올리지 않고 청크 단위로 직접 디스크에 저장"""
-    try:
-        with requests.get(url, headers=headers, stream=True, timeout=30) as r:
-            r.raise_for_status()
-            with open(file_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=1024 * 512):  # 512KB 청크
-                    if chunk:
-                        f.write(chunk)
+# ── 다운로드 함수 ─────────────────────────────────────────────
+def download_asset(asset_type, file_number, keyword, p_key, pb_key, save_path, log_ph):
+    if 'downloaded_ids' not in st.session_state:
+        st.session_state.downloaded_ids = set()
+
+    asset_id = f"{asset_type}_{int(file_number):03d}"
+
+    f_ext  = 'mp4' if asset_type == 'video' else 'jpg'
+    f_name = os.path.join(save_path, f"{int(file_number):03d}.{f_ext}")
+
+    if os.path.exists(f_name) and not clear_existing:
+        if asset_id not in st.session_state.downloaded_ids:
+            log_ph.info(f"⏭ {asset_type} #{int(file_number):03d} 이미 존재 — 스킵")
+            st.session_state.downloaded_ids.add(asset_id)
         return True
-    except Exception as e:
-        return False
 
+    file_url    = None
+    source_used = ""
+    q = requests.utils.quote(keyword)
 
-# ──────────────────────────────────────────────
-# Pexels 다운로드 함수
-# ──────────────────────────────────────────────
-def fetch_from_pexels(query, asset_type, api_key, save_path, file_prefix):
-    headers = {"Authorization": api_key}
-    if asset_type == "Videos":
-        url = f"https://api.pexels.com/videos/search?query={query}&orientation=landscape&per_page=3"
-        res = requests.get(url, headers=headers, timeout=10).json()
-        items = res.get('videos', [])
-        if not items:
-            return False, "결과 없음"
-        
-        # 화질 기준 정렬 (width 기준 내림차순)
-        video = items[0]
-        video_files = video.get('video_files', [])
-        best = max(video_files, key=lambda x: x.get('width', 0))
-        file_url = best['link']
-        ext = "mp4"
+    # ── Pexels ──────────────────────────────────────────────
+    if p_key:
+        headers = {"Authorization": p_key}
+        try:
+            if asset_type == 'video':
+                res = requests.get(
+                    f"https://api.pexels.com/videos/search?query={q}&orientation=landscape&per_page=15&size=medium",
+                    headers=headers, timeout=15
+                ).json()
+                videos = res.get('videos', [])
+                if videos:
+                    pick = videos[int(file_number) % len(videos)]
+                    for vf in pick.get('video_files', []):
+                        if vf.get('file_type') == 'video/mp4' and vf.get('quality') in ('hd', 'sd'):
+                            file_url = vf['link']
+                            break
+                    if not file_url and pick.get('video_files'):
+                        file_url = pick['video_files'][0]['link']
+                    source_used = "Pexels"
+            else:
+                res = requests.get(
+                    f"https://api.pexels.com/v1/search?query={q}&orientation=landscape&per_page=15&size=medium",
+                    headers=headers, timeout=15
+                ).json()
+                photos = res.get('photos', [])
+                if photos:
+                    pick = photos[int(file_number) % len(photos)]
+                    file_url = pick['src'].get('large', pick['src'].get('medium'))
+                    source_used = "Pexels"
+        except Exception as e:
+            log_ph.warning(f"Pexels 오류 #{file_number}: {e}")
+
+    # ── Pixabay 폴백 ─────────────────────────────────────────
+    if not file_url and pb_key:
+        try:
+            if asset_type == 'video':
+                res = requests.get(
+                    f"https://pixabay.com/api/videos/?key={pb_key}&q={q}&orientation=horizontal&per_page=15",
+                    timeout=15
+                ).json()
+                hits = res.get('hits', [])
+                if hits:
+                    pick = hits[int(file_number) % len(hits)]
+                    file_url = pick.get('videos', {}).get('medium', {}).get('url')
+                    source_used = "Pixabay"
+            else:
+                res = requests.get(
+                    f"https://pixabay.com/api/?key={pb_key}&q={q}&image_type=photo&orientation=horizontal&per_page=15",
+                    timeout=15
+                ).json()
+                hits = res.get('hits', [])
+                if hits:
+                    pick = hits[int(file_number) % len(hits)]
+                    file_url = pick.get('largeImageURL')
+                    source_used = "Pixabay"
+        except Exception as e:
+            log_ph.warning(f"Pixabay 오류 #{file_number}: {e}")
+
+    # ── 실제 다운로드 ────────────────────────────────────────
+    if file_url:
+        try:
+            r = requests.get(file_url, stream=True, timeout=60)
+            r.raise_for_status()
+            with open(f_name, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            log_ph.success(f"✅ [{source_used}] {asset_type} #{int(file_number):03d} → {keyword[:45]}")
+            st.session_state.downloaded_ids.add(asset_id)
+            return True
+        except Exception as e:
+            log_ph.error(f"❌ 저장 실패 {asset_type} #{file_number}: {e}")
     else:
-        url = f"https://api.pexels.com/v1/search?query={query}&orientation=landscape&per_page=3"
-        res = requests.get(url, headers=headers, timeout=10).json()
-        items = res.get('photos', [])
-        if not items:
-            return False, "결과 없음"
-        file_url = items[0]['src']['large2x']  # 고해상도 이미지
-        ext = "jpg"
+        log_ph.error(f"❌ URL 없음 — {asset_type} #{file_number} | 키워드: {keyword}")
 
-    f_name = os.path.join(save_path, f"{file_prefix}.{ext}")
-    success = stream_download(file_url, f_name)
-    return success, f_name if success else "다운로드 실패"
+    return False
 
-
-# ──────────────────────────────────────────────
-# Pixabay 폴백 다운로드 함수
-# ──────────────────────────────────────────────
-def fetch_from_pixabay(query, asset_type, api_key, save_path, file_prefix, quality_key="medium"):
-    if asset_type == "Videos":
-        url = (
-            f"https://pixabay.com/api/videos/"
-            f"?key={api_key}&q={requests.utils.quote(query)}"
-            f"&video_type=film&per_page=3&safesearch=true"
-        )
-        res = requests.get(url, timeout=10).json()
-        items = res.get('hits', [])
-        if not items:
-            return False, "결과 없음"
-        
-        # large → medium → small 순서로 폴백
-        videos_obj = items[0].get('videos', {})
-        for q in [quality_key, "medium", "small"]:
-            candidate = videos_obj.get(q, {})
-            file_url = candidate.get('url', '')
-            if file_url:
-                break
-        if not file_url:
-            return False, "URL 없음"
-        ext = "mp4"
-    else:
-        url = (
-            f"https://pixabay.com/api/"
-            f"?key={api_key}&q={requests.utils.quote(query)}"
-            f"&image_type=photo&orientation=horizontal"
-            f"&min_width=1280&per_page=3&safesearch=true"
-        )
-        res = requests.get(url, timeout=10).json()
-        items = res.get('hits', [])
-        if not items:
-            return False, "결과 없음"
-        file_url = items[0].get('largeImageURL', '')
-        if not file_url:
-            return False, "URL 없음"
-        ext = "jpg"
-
-    f_name = os.path.join(save_path, f"{file_prefix}_pixabay.{ext}")
-    success = stream_download(file_url, f_name)
-    return success, f_name if success else "다운로드 실패"
-
-
-# ──────────────────────────────────────────────
-# 통합 다운로드 오케스트레이터
-# ──────────────────────────────────────────────
-def download_assets(keywords, asset_type, pexels_key, pixabay_key, folder_path, quality_key):
-    sub_folder = "영상" if asset_type == "Videos" else "이미지"
-    save_path = os.path.join(folder_path, sub_folder)
-    os.makedirs(save_path, exist_ok=True)
-
-    total = len(keywords)
-    progress_bar = st.progress(0)
-    status_box   = st.empty()
-    result_log   = []
-
-    for idx, item in enumerate(keywords):
-        if not item.strip():
-            continue
-
-        # 키워드 파싱
-        query     = item.split('_')[0].strip() if '_' in item else item.strip()
-        query     = re.sub(r'[^\w\s]', '', query)  # 특수문자 제거
-        safe_name = re.sub(r'[\\/*?:"<>|]', "", item.replace(' ', '_'))
-        prefix    = f"{idx+1:03d}_{safe_name}"
-
-        status_box.info(f"🔄 [{idx+1}/{total}] '{query}' 수집 중... (Pexels 시도)")
-
-        # 1차: Pexels
-        success, result = fetch_from_pexels(query, asset_type, pexels_key, save_path, prefix)
-
-        # 2차: Pixabay 폴백
-        if not success and pixabay_key:
-            status_box.warning(f"⚡ [{idx+1}/{total}] Pexels 실패 → Pixabay로 폴백 중...")
-            success, result = fetch_from_pixabay(query, asset_type, pixabay_key, save_path, prefix, quality_key)
-
-        # 결과 로그
-        if success:
-            result_log.append(f"✅ [{idx+1:03d}] {item}")
-        else:
-            result_log.append(f"❌ [{idx+1:03d}] {item} — 양쪽 모두 실패")
-
-        # 진행률 업데이트
-        progress_bar.progress((idx + 1) / total)
-
-        # Rate Limit 방지: 0.4초 딜레이
-        time.sleep(0.4)
-
-    status_box.empty()
-    return result_log
-
-
-# ──────────────────────────────────────────────
-# 실행 버튼
-# ──────────────────────────────────────────────
-if st.button("🚀 캡컷 소스 다운로드 시작", type="primary"):
+# ── 수집 가동 버튼 ───────────────────────────────────────────
+if st.button("🚀 즉시 수집 가동", type="primary", use_container_width=True):
 
     # 유효성 검사
     if not user_pexels_key and not user_pixabay_key:
-        st.error("❌ Pexels 또는 Pixabay API Key 중 하나는 반드시 입력해야 합니다.")
+        st.error("Pexels 또는 Pixabay API Key를 입력해주세요.")
+        st.stop()
+    if not uploaded_file:
+        st.error("CSV 파일을 업로드해주세요.")
+        st.stop()
+    if not img_keyword_raw.strip() and not vid_keyword_raw.strip():
+        st.error("이미지 또는 영상 키워드를 입력해주세요.")
         st.stop()
 
-    # 저장 경로 준비
-    project_path = os.path.join(save_root, project_name)
-    os.makedirs(project_path, exist_ok=True)
+    # 파싱
+    img_kw = parse_keywords(img_keyword_raw)
+    vid_kw = parse_keywords(vid_keyword_raw)
+    rows   = parse_csv(uploaded_file)
 
-    try:
-        # 키워드 준비
-        if "A플랜" in mode:
-            if not user_gemini_key or not script_input:
-                st.error("❌ Gemini API Key와 대본을 모두 입력해주세요.")
-                st.stop()
-            with st.spinner("🤖 Gemini가 키워드를 추출하고 있습니다..."):
-                v_keys = extract_keywords_with_genai(script_input, video_count, "영상", user_gemini_key)
-                i_keys = extract_keywords_with_genai(script_input, image_count, "사진", user_gemini_key)
-            st.success(f"✅ 키워드 추출 완료 — 영상 {len(v_keys)}개 / 이미지 {len(i_keys)}개")
-            with st.expander("📋 추출된 키워드 확인"):
-                st.write("**영상 키워드:**", v_keys)
-                st.write("**이미지 키워드:**", i_keys)
-        else:
-            v_keys = [k for k in manual_video_keys.split('\n') if k.strip()]
-            i_keys = [k for k in manual_image_keys.split('\n') if k.strip()]
+    if not rows:
+        st.error("CSV에서 유효한 데이터를 찾을 수 없습니다.")
+        st.stop()
 
-        # ── 영상 다운로드 ──
-        if v_keys:
-            st.markdown("#### 🎬 영상 수집 중...")
-            v_log = download_assets(v_keys, "Videos", user_pexels_key, user_pixabay_key, project_path, quality_key)
-            with st.expander(f"📄 영상 수집 결과 ({len(v_keys)}개)"):
-                for line in v_log:
-                    st.write(line)
+    st.success(f"✅ CSV {len(rows)}개 씬 감지 | 이미지 키워드 {len(img_kw)}개 | 영상 키워드 {len(vid_kw)}개")
 
-        # ── 이미지 다운로드 ──
-        if i_keys:
-            st.markdown("#### 🖼️ 이미지 수집 중...")
-            i_log = download_assets(i_keys, "Images", user_pexels_key, user_pixabay_key, project_path, quality_key)
-            with st.expander(f"📄 이미지 수집 결과 ({len(i_keys)}개)"):
-                for line in i_log:
-                    st.write(line)
+    # 폴더 세팅
+    v_path = f"{project_name}/Videos"
+    i_path = f"{project_name}/Images"
+    if clear_existing:
+        shutil.rmtree(v_path, ignore_errors=True)
+        shutil.rmtree(i_path, ignore_errors=True)
+    os.makedirs(v_path, exist_ok=True)
+    os.makedirs(i_path, exist_ok=True)
 
-        # ── 완료 메시지 ──
-        st.balloons()
-        st.success(f"""
-        🎉 **모든 소스 수집 완료!**
+    # CSV에서 번호 추출
+    img_nums = []
+    vid_nums = []
+    for row in rows:
+        i_num = row.get('image_number', '').strip()
+        v_num = row.get('video_number', '').strip()
+        if i_num and i_num.isdigit():
+            n = int(i_num)
+            if n not in img_nums: img_nums.append(n)
+        if v_num and v_num.isdigit():
+            n = int(v_num)
+            if n not in vid_nums: vid_nums.append(n)
 
-        📂 저장 위치: `{project_path}`
-        └── 📁 영상/  (mp4 파일들)
-        └── 📁 이미지/ (jpg 파일들)
+    total    = len(img_nums) + len(vid_nums)
+    progress = st.progress(0)
+    log_area = st.empty()
+    done     = 0
+    s_img = f_img = s_vid = f_vid = 0
 
-        👆 위 경로를 탐색기에서 열어 캡컷에 드래그하세요!
-        """)
+    # 이미지 수집
+    for n in sorted(img_nums):
+        kw = img_kw.get(n, f"cinematic scene {n}")
+        ok = download_asset('image', n, kw, user_pexels_key, user_pixabay_key, i_path, log_area)
+        if ok: s_img += 1
+        else:  f_img += 1
+        done += 1
+        progress.progress(done / total)
+        time.sleep(req_interval)
 
-        # 폴더 바로 열기 버튼 (Windows 전용)
-        if st.button("📂 저장 폴더 열기 (Windows)"):
-            os.startfile(project_path)
+    # 영상 수집
+    for n in sorted(vid_nums):
+        kw = vid_kw.get(n, f"cinematic video {n}")
+        ok = download_asset('video', n, kw, user_pexels_key, user_pixabay_key, v_path, log_area)
+        if ok: s_vid += 1
+        else:  f_vid += 1
+        done += 1
+        progress.progress(done / total)
+        time.sleep(req_interval)
 
-    except Exception as e:
-        st.error(f"❌ 오류 발생: {e}")
-        st.exception(e)
+    # 결과 요약
+    st.divider()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("이미지 성공", f"{s_img}장")
+    c2.metric("이미지 실패", f"{f_img}장")
+    c3.metric("영상 성공",   f"{s_vid}개")
+    c4.metric("영상 실패",   f"{f_vid}개")
+
+    # ZIP 다운로드
+    shutil.make_archive(project_name, 'zip', project_name)
+    st.success("🎉 수집 완료! 아래 버튼으로 전체 패키지를 다운로드하세요.")
+    with open(f"{project_name}.zip", "rb") as f:
+        st.download_button(
+            "📦 전체 패키지 다운로드",
+            f,
+            file_name=f"{project_name}.zip",
+            mime="application/zip"
+        )
